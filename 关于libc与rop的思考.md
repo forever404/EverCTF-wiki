@@ -26,7 +26,7 @@ payload = 'a' * 0x80 + p32(write_got) + p32(vuln) + p32(0) + p32(address_to_leak
 
 &emsp;&emsp;我们可以看到64位的程序的参数在6个以内时会优先调用寄存器，而使用的顺序如下：  
 
-```python
+```at&t
 	%rdi => arg1
 	
 	%rsi => arg2
@@ -214,10 +214,10 @@ objdump -d rop_libc
    #gadget1
    1292:       5b                      pop    %rbx
    1293:       5d                      pop    %rbp
-   1294:       41 5c                 pop    %r12
-   1296:       41 5d                pop    %r13
-   1298:       41 5e                pop    %r14
-   129a:       41 5f                 pop    %r15
+   1294:       41 5c                   pop    %r12
+   1296:       41 5d                   pop    %r13
+   1298:       41 5e                   pop    %r14
+   129a:       41 5f                   pop    %r15
    129c:       c3                      retq   #此处构造一些padding(7*8=56byte)就可以返回了
 ```
 
