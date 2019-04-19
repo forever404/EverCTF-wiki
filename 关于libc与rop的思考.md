@@ -1,9 +1,6 @@
----
-title: 关于libc与rop的思考
-date: 2019-04-11 20:13:07
-tags:
-    - thinking
----
+<h2 align=center>关于libc与rop的思考</h2>
+
+
 
 ###  那些奇妙的组合  
 
