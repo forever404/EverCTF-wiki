@@ -335,7 +335,11 @@ sh.interactive()
 
 > 以上是对x64libc泄漏的处理方式
 
-#### 书山又路勤为径,学海无涯苦做舟
+#### 书山又路勤为径,学海无涯苦做舟  
+
+---  
+
+<h5><a href="https://dyf.netlify.com">Author dyf@Ever404</a><h5>
 
 
 
