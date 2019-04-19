@@ -339,7 +339,7 @@ sh.interactive()
 
 ---  
 
-<h5><a href="https://dyf.netlify.com">Author dyf@Ever404</a><h5>
+<h5 align=center><a href="https://dyf.netlify.com">Author dyf@Ever404</a><h5>
 
 
 
