@@ -1,9 +1,4 @@
----
-title: solidity文档整理
-date: 2019-03-28 14:28:17
-tags:
-	- thinking
----
+<h2 align=center>关于libc与rop的思考</h2>
 
 
 ### 文档整理  
@@ -1264,6 +1259,9 @@ contract C {
 
 
 
+---  
+
+<h5 align=center><a href="https://dyf.netlify.com">Author dyf@Ever404</a><h5>
 
 
 
