@@ -10,7 +10,7 @@
 
 &emsp;&emsp;状态变量指的是那些直接声明在函数外的变量，他们被永久的储存在合约里。  
 
-```javascript
+```solidity
 pragma solidity >= 0.4.0 < 0.6.0;
 
 contract SimpleStorage{
@@ -26,7 +26,7 @@ contract SimpleStorage{
 
 &emsp;&emsp;函数修改器主要是以声明的形式来修改函数的语义，比如给函数的出发增加限制条件或者验证。  
 
-```javascript
+```solidity
 pragma solidity >= 0.4.0 < 0.6.0;
 contract Purchase{
     address public seller;
@@ -46,7 +46,7 @@ contract Purchase{
 
 &emsp;&emsp;事件是**EVM logging**的便利接口。当事件被触发时，可将部分数据记录到区块链上。  
 
-```javascript
+```solidity
 pragma solidity >= 0.4.0 < 0.6.0;
 
 contract SimpleAuction{
@@ -108,7 +108,7 @@ contract Purchase {
 
 > **||** 和 **&&** 遵守短路定律，这意味着表达式  
 
-```javascript
+```solidity
 f(x) || g(y)
 ```
 &emsp;&emsp;如果f(x)为真，g(y)将不参与运算，尽管这可能有副作用。  
@@ -147,7 +147,7 @@ f(x) || g(y)
 >
 > > 如果你想要将一个大的bytes类型转换为地址，比如bytes32,这个时候address会截尾，为了避免二义性，你必须显式的自行进行截断的选择。
 
-```javascript
+```solidity
 b = 0x111122223333444455556666777788889999AAAABBBBCCCCDDDDEEEEFFFFCCCC;
 
 address(uint160(bytes20(b))) 		//这时结果为0x111122223333444455556666777788889999aAaa
@@ -162,7 +162,7 @@ address(uint169(uint256(b)))		//这时结果为0x777788889999AaAAbBbbCcccddDdeee
 
 &emsp;&emsp;如果地址是payable的，那么我们可以查询地址剩余的Ether或者向他打钱，例如：  
 
-```javascript
+```solidity
 address payable x = address(0x123);
 address myAddress = address(this);
 
@@ -185,7 +185,7 @@ if(x.balance < 10 && myAddress.balance >= 10){
 > 关于call()  delegatecall()   staticcall()
 > 为了不依赖于ABI来调用合约的接口，或者更为直接的调用其他合约的方法，solidity提供了call，delegatecall，staticcall。他们都接受一个**bytes memory**类型的参数，并且返回bool类型和被调用方法的返回值。方法abi.encode,abi.encodePacked,abi.encodeWithSelector以及abi.encodeWithSignature 可以被用来将数据编码结构化。
 
-```javascript
+```solidity
 bytes memory payload = abi.encodeWithSignature("register(string)","MyName");
 
 (bool success, bytes memory returnData) = address(nameReg).call(payload);
@@ -208,19 +208,19 @@ require(success);
 
 1. 通过gas()函数修改器来调整Gas  
 
-```javascript
+```solidity
 address(nameReg).call.gas(1000000)(abi.encodeWithSignature("register(string)", "MyName"));
 ```
 
 2. 通过value()函数修改器来调整Ether：  
 
-```javascript
+```solidity
 address(nameReg).call.value(1 ether)(abi.encodeWithSignature)("register(string)","MyName");
 ```
 
 3. 这两种函数修改器可以结合：  
 
-```javascript
+```solidity
 address(nameReg).call.gas(1000000).value(1 ether)(abi.encodeWithSignature("register(string)", "MyName"));
 ```
 
@@ -243,7 +243,7 @@ address(nameReg).call.gas(1000000).value(1 ether)(abi.encodeWithSignature("regis
 
 &emsp;&emsp;你可以声明一个合约类型的局部变量，那么你就可以调用那个合约的方法，如：  
 
-```javascript
+```solidity
 contract A {
 	uint x;
     contrusctor(uint a) internal{
@@ -261,7 +261,7 @@ contract B {
 
 &emsp;&emsp;但是假如你想要调用已经存在的一个实例，比如想要攻击已经在链上的一个合约，这个时候你可以：  
 
-```javascript
+```solidity
 contract Fuck {
 	address target_contract_addr = "0x123";		//首先获得攻击目标的地址
     
@@ -303,7 +303,7 @@ Operator：
 
 > 5/2对于字面量来说是2.5，而对于uint来说是2。字面量参与非字面量进行运算时，其类型必须相同，如:  
 
-```javascript
+```solidity
 
 uint128 a = 1;
 uint128 b = 2.5 + a;		//这样写是会报错的
@@ -315,7 +315,7 @@ uint128 b = 2.5 + a;		//这样写是会报错的
 
 &emsp;&emsp;函数的用法与js极为相似，只是有些可见性关键字需要解释一下，首先来看一下声明格式：  
 
-```javascript
+```solidity
 function (<parameter types>) {internal|external} [pure|view|payable] [<returns types>]
 ```
 
@@ -333,7 +333,7 @@ function (<parameter types>) {internal|external} [pure|view|payable] [<returns t
 
 &emsp;&emsp;当前代码单元内，比如同一个合约内的函数，引入的library库，以及父类函数的直接调用即为internal调用，比如：  
 
-```javascript
+```solidity
 pragma solidity >=0.4.0 < 0.6.0;
 
 contract test{
@@ -351,7 +351,7 @@ contract test{
 
 &emsp;&emsp;external调用实现了合约的外部消息调用。所以合约在初始化时不能以external的方式调用自身函数，因为此时合约仍未构造完成，此处可类比struct类型，一个结构体不能包含自身对象。但是可以以this的方式强制进行external调用。  
 
-```javascript
+```solidity
 pragma solidity >= 0.4.0 < 0.6.0;
 contract test{
     function  a() external {}
@@ -370,7 +370,7 @@ contract test{
 #### public  
 
 &emsp;&emsp;public的特点是，函数既可以以internal方式调用，也可以用internal方式调用。public函数可以被外部接口访问，是合约对外接口的一部分。 
-```javascript
+```solidity
 pragma solidity >= 0.4.0 < 0.6.0
 
 contract test{
@@ -392,7 +392,7 @@ contract test{
 
 &emsp;&emsp;对于private，与internal的区别是，private的方法在子类中无法调用，即使被声明为private也不能阻止数据的查看。访问权限仅仅是限制其他合约对函数的访问和数据修改的权限。而private方法也默认以internal的方式调用。  
 
-```javascript
+```solidity
 pragma solidity >= 0.4.0 < 0.6.0;
 
 contract test{
@@ -442,7 +442,7 @@ Member:
 
 &emsp;&emsp;我们来看一下用法示例：  
 
-```javascript
+```solidity
 pragma solidity >=0.4.16 <0.6.0;
 
 contract Example {
@@ -457,7 +457,7 @@ contract Example {
 
 &emsp;&emsp;下面是internal关键字的用法示例：  
 
-```javascript
+```solidity
 pragma solidity >=0.4.16 <0.6.0;
 
 library ArrayUtils {
@@ -510,7 +510,7 @@ contract Pyramid {
 
 &emsp;&emsp;接下来是external关键字的用法：  
 
-```javascript
+```solidity
 pragma solidity >=0.4.22 <0.6.0;
 
 contract Oracle {
@@ -572,7 +572,7 @@ contract OracleUser {
 3. 当storage赋值给local storage(函数中的storage)之间时，此时也仅仅分配一个引用  
 4. 其他所有赋值给storage或状态变量的操作都会创造一个拷贝对象，即使给storage的局部变量仅仅是个引用。下面的例子展现了这几种特性：  
 
-```javascript
+```solidity
 pragma solidity >=0.4.0 <0.6.0;
 
 contract C {
@@ -606,7 +606,7 @@ contract C {
 
 &emsp;&emsp;数组的用法上面介绍的都差不多了，这里需要注意的是solidity中的数组的声明方式与通常的语言不同，他的第一个下标是一个数组的位置，第二个下标是数组中元素的位置：  
 
-```javascript
+```solidity
 uint[][5] x memory;		//一个由5个储存uint类型的动态数组被写入数组x		这种方式与其他语言相反
 
 X[2][1];		//代表第三个数组的第二个元素
@@ -626,7 +626,7 @@ T[5] a;			//T本身可以是个数组，那么a[2]就代表T类型的变量
 
 &emsp;&emsp;solidity没有字符串操作函数，但有第三方字符串库。还可以使用keccak256-hash函数来比较两个字符串：  
 
-```javascript
+```solidity
 keccak256(abi.encodePacked(s1)) == keccak256(abi.encodePacked(s2))
 ```
 
@@ -636,7 +636,7 @@ keccak256(abi.encodePacked(s1)) == keccak256(abi.encodePacked(s2))
 
 > 加入你一定要对string对象进行.length或者寻址操作，那么你应当先把他强制转换为bytes类型，如：  
 
-```javascript
+```solidity
 string s;
 
 uint len = bytes(s).length;
@@ -648,7 +648,7 @@ bytes(s)[7] = 'x';
 
 &emsp;&emsp;为数组分配内存与C++类似，要使用new关键字在内存中创建运行时确定长度的数组,如：  
 
-```javascript
+```solidity
 pragma solidity >=0.4.16 <0.6.0;
 
 contract C {
@@ -685,7 +685,7 @@ contract C {
 
 &emsp;&emsp;数组用法实例如下：  
 
-```javascript
+```solidity
 pragma solidity >=0.4.16 <0.6.0;
 
 contract ArrayContract {
@@ -780,7 +780,7 @@ contract ArrayContract {
 
 &emsp;&emsp;Solidity提供了一种声明新的类型的方法，即struct。struct与C/C++一样，用法如下：  
 
-```javascript
+```solidity
 pragma solidity >=0.4.11 <0.6.0;
 
 contract CrowdFunding {
@@ -841,7 +841,7 @@ contract CrowdFunding {
 
 &emsp;&emsp;当然，在函数中你可以直接访问一个结构对象的成员，而不必将其再次赋值给一个局部变量，因为Solidity为其创建了getter。  
 
-```javascript
+```solidity
 campaigns[campaignID].amount = 0
 ```
 
@@ -851,7 +851,7 @@ campaigns[campaignID].amount = 0
 
 &emsp;&emsp;映射与python中的字典类似但意义不同，其声明的语法如下：  
 
-```javascript
+```solidity
 mapping(_KeyType => _ValueType)
 
 //_KeyType可以是任意初等型
@@ -867,7 +867,7 @@ mapping(_KeyType => _ValueType)
 
 &emsp;&emsp;你可以将映射标记为public类型，并且Solidity为他创建了一个getter()接口，_KeyType将作为getter()的参数，如果_ValueType是值类型或者结构类型，那么getter将直接返回该对象，如果_ValueType是数组或映射，那么getter将返回一个包含所有_KeyType的变量，这将可以递归下去。 实例如下：  
 
-```javascript
+```solidity
 pragma solidity >=0.4.0 <0.6.0;
 
 contract MappingExample {
@@ -899,7 +899,7 @@ contract MappingUser {
 
 > delete对映射无效，因此假如struct中含有映射对象，delete并不会递归执行。但是映射单独的键值关系可以被删除：  
 
-```javascript
+```solidity
 delete a[msg.sender];		//这将是有效的
 ```
 
@@ -907,7 +907,7 @@ delete a[msg.sender];		//这将是有效的
 
 &emsp;&emsp;用法如下：  
 
-```javascript
+```solidity
 pragma solidity >=0.4.0 <0.6.0;
 
 contract DeleteExample {
@@ -1015,7 +1015,7 @@ contract DeleteExample {
 
 &emsp;&emsp;你可以直接使用十进制或者十六进制的符号作为整数常量，并且pushi指令将会自动执行，如下代码2+3的到5然后和string "abc"进行and运算。最终结果被赋值给局部变量x。string是左对齐的并且不能超过32字节。
 
-```javascript
+```solidity
 assembly { let x := and("abc", add(3, 2)) }
 ```
 
@@ -1023,13 +1023,13 @@ assembly { let x := and("abc", add(3, 2)) }
 
 &emsp;&emsp;对于opcode序列,通常很难看到某些opcode的实际参数是什么。如下例子中，3被加到当前memory的0x80的的位置。  
 
-```javascript
+```solidity
 3 0x80 mload add 0x80 mstore
 ```
 
 Solidity的内联汇编有函数风格的表示，如下：
 
-```javascript
+```solidity
 mstore(0x80, add(mload(0x80), 3))
 ```
 
@@ -1043,7 +1043,7 @@ mstore(0x80, add(mload(0x80), 3))
 
 &emsp;&emsp;例如：  
 
-```javascript
+```solidity
 pragma solidity >=0.4.11 <0.6.0;
 
 contract C {
@@ -1062,7 +1062,7 @@ contract C {
 
 &emsp;&emsp;你可以使用let关键字声明一个之在汇编内可见的局部变量，并且之在当前的代码块内可见。let指令将会新建一个栈的slot来存储变量并且代码块结束时自动移除。你需要为他提供一个初始化值，否则他默认为0。当然你可以按照更复杂的函数式来实现。  
 
-```javascript
+```solidity
 pragma solidity >=0.4.16 <0.6.0;
 
 contract C {
@@ -1093,7 +1093,7 @@ contract C {
 ```
 &emsp;&emsp;if语句条件执行，但是没有"else"的部分。如果你想提供多重选择，你可以考虑使用switch语句。  
 
-```javascript
+```solidity
 {
     if eq(value, 0) { revert(0, 0) }
 }
@@ -1103,7 +1103,7 @@ contract C {
 
 &emsp;&emsp;你可以使用switch语句来实现基本的"if/else"语句，你可以使用 **default **关键字来声明一个fallback或者默认选项。
 
-```javascript
+```solidity
 {
     let x := 0
     switch calldataload(4)
@@ -1123,7 +1123,7 @@ contract C {
 
 &emsp;&emsp;以下例子是计算一片内存的和：  
 
-```javascript
+```solidity
 {
     let x := 0
     for { let i := 0 } lt(i, 0x100) { i := add(i, 0x20) } {
@@ -1134,7 +1134,7 @@ contract C {
 
 &emsp;&emsp;当然，你也可以用他来实现while风格：  
 
-```javascript
+```solidity
 {
     let x := 0
     let i := 0
@@ -1151,7 +1151,7 @@ contract C {
 
 &emsp;&emsp;下面的示例通过平方和乘法实现幂函数：  
 
-```javascript
+```solidity
 {
     function power(base, exponent) -> result {
         switch exponent
@@ -1171,7 +1171,7 @@ contract C {
 &emsp;&emsp;与EVM汇编相比，Solidity有些类型不足256位，为了使计算更有效，EVM通常将他们以256为来对待，强行把它们放在一个slot内，而高阶位元只在必要时才会被清理，就在它们被写入内存或执行比较之前不久。所以如果你想要使用内联汇编来访问他们的话，你必须手动清零高位。  
 &emsp;&emsp;solidity以一种非常简单的方式管理内存：内存中的位置0x40处有一个“空闲内存指针”。如果要分配内存，只需使用从指针指向的位置开始的内存，并相应地更新它。但我们无法保证内存之前没有被使用过，所以你不能假设他的初始内容是0。没有内置的内存释放或回收机制，下面是一个内存分配的例子：    
 
-```javascript
+```solidity
 function allocate(length) -> pos {
   pos := mload(0x40)
   mstore(0x40, add(pos, length))
@@ -1188,7 +1188,7 @@ function allocate(length) -> pos {
 
 &esmp;&emsp;独立汇编是区块链逆向的基础，我们直接来感受一下吧：  
 
-```javascript
+```solidity
 pragma solidity >=0.4.16 <0.6.0;
 
 contract C {
