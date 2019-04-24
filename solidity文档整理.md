@@ -1,5 +1,5 @@
-<h2 align=center>关于libc与rop的思考</h2>
-
+<h2 align=center>Solidity文档整理</h2>
+<h4 align=center>译者:dyf@Ever404</h4>
 
 ### 文档整理  
 ---
@@ -63,7 +63,7 @@ contract SimpleAuction{
 
 &emsp;&emsp;结构体与c语言极为相似  
 
-```c
+```solidity
 pragma solidity >= 0.4.0 < 0.6.0;
 
 contract Ballot{
@@ -80,7 +80,7 @@ contract Ballot{
 
 &emsp;&emsp;枚举与C++中的枚举类似，都是自定义类型，你可以认为这是一个常量集合。  
 
-```c++
+```solidity
 pragma solidity >= 0.4.0 < 0.6.0;
 
 contract Purchase {
