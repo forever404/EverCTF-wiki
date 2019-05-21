@@ -1241,23 +1241,433 @@ contract C {
 
 - 状态变量的内存布局  
 
+&emsp;&emsp;固定大小的变量(除了mapping和动态数组)都存储在从0开始的连续区域内，多个少于32字节的连续对象将按照一下规则被打包在一个slot内：  
+
+1. slot中的第一个对象是低阶对齐的  
+2. 基本类型只消耗存储他们所必须的字节
+3. 若slot中剩下的空间不足储存一个基本类型，那么他将被存储到下一个slot  
+4. 结构和数组总是占据一个新的slot并占据整个slot，但是其中的数据将符合这些规则  
+
+&emsp;&emsp;当使用的变量小于32字节时，你的合约将消耗更多的gas。因为EVM一次对32字节进行操作，因此如果变量小于32字节，EVM必须执行更多的指令，将元素从32字节减小到所需大小。  
+&emsp;&emsp;只有当处理storage类型的变量是减小参数的大小才是有益的，因为编译器将把多个元素打包到一个slot内，从而将多次读写结合在一个操作内。当处理函数参数或者memory类型的变量时，这并没有什么增益，因为编译器并不会将他们打包。  
+&emsp;&emsp;为了确保EVM能够对此优化，你应当保证storage类型的变量能够被紧密的打包，例如，声明storage变量`uint128, uint128, uint256`将会比`uint128, uint 256, uint128`更加有效，因为前者占用两个slot而后者占用三个。  
+
+> struct和mapping中的元素将彼此紧挨着存在一起，就好像他们已经被显示的给定。
+
+- 映射与动态数组(Mappings and Dynamic Arrays)  
+
+&emsp;&emsp;由于映射与动态数组大小的不可预测性，通常情况下使用keccak-256的hash来计算值的起始位置或者查找数组的值，这些起始位置总是占据一个slot。  
+
+&emsp;&emsp;根据以上规则，映射与动态数组本身将在storage的p处占据一个slot。对于动态数组来说，这个slot(即数组指针的位置)将用来储存该数组的大小。对于映射来说，这个slot将是空的(但这是必要的，以便两个相等的映射具有不同的hash分布)。数组的数据将被出存在keccak256(p)处，而映射键k所对应的值p将出存在keccak256(k.p)处，若所对应的值仍为非基本类型，则其储存位置为keccak256(k.p)加一个偏移。  
+
+&emsp;&emsp;例如以下合约片段：  
+
+```solidity
+pragma solidity >=0.4.0 <0.7.0;
+
+contract C {
+  struct s { uint a; uint b; }
+  uint x;
+  mapping(uint => mapping(uint => s)) data;
+}
+```
+
+> data\[4\]\[9].b的位置在 keccak256(uint256(9).keccak256(uint256(4).uint256(1))) + 1
+
+- 二进制数组与字符串(Bytes and String)  
+
+&emsp;&emsp;bytes和string将会被完全相同地编码。对于 `short byte arrays` 长度和数据将会被出存在同一个slot内。特别地：如果数据最长为 31 bytes，	那么数据将会存储在高阶字节中(左对齐)，最低阶字节存储 `length * 2` 。对于存储32或更长字节的数组，主slot将存储 `length * 2  +1`,数据通常存储在 `keccak256(slot)` 中。这意味着你可以通过检查是否设置了低位来区分长数组与短数组：短数组(未设置) 长数组(设置)  
+
+> 处理非法编码的插槽目前并不支持，但日后可能会增加。  
+
+- 内存布局(Layout in Memory)  
+
+&emsp;&emsp;solidity保留4个32-bytes的slot，具体范围与使用目的如下：  
+
+* `0x00` - `0x3f`(64字节)：哈希运算的草稿(scratch)空间，即临时空间  
+* `0x40` - `0x5f`(32字节)：当前分配的内存大小(空闲内存指针)
+* `0x60` - `0x7f`(32字节)：零插槽(Zero slot)  
+
+&emsp;&emsp;可以在语句之间使用Strach空间(即内联汇编)。零插槽用于给动态数组初始化，永远都不应被写入，因此空闲内存指针z最初指向 `0x80`。  
+
+&emsp;&emsp;Solidity总是将新的对象放置于空闲内存指针上，并且内存将永远不会释放(这在以后可能会改变)。  
+
+> Solidity中可能有一些操作会使用超出64字节的临时空间(Scratch)，他们将会被分配到空闲内存指针指向的位置，但是给予其较短的生命周期，而且指针本身不会更新，因此该内存可能为零也可能不为零。所以，我们不应当认为空闲内存是默认置零的。  
+> 看起来使用 `msize` 来获得一个确定的置零空闲内存是个不错的选择，然而，如果不更新此指针，将其作为非临时指针使用的话可能带来负面效果，原理同上。  
+>
+> > 注：`msize`的作用为获得当前最大可索引空间的大小，即空闲指针。  
+
+- 调用数据布局(Layout of Call Data)  
+
+&emsp;&emsp;函数调用时的数据将被假定为ABI规范定义的格式。其中，ABI规范要求将参数填充为32字节的倍数。Internal类型的函数调用使用不同的约定。  
+
+&emsp;&emsp;合约构造函数的参数将会直接附加在合约代码的末尾，也使用ABI编码。构造函数将使用硬编码偏移量来访问他们，而非使用 `codesize` 的操作码，因为当数据附加到代码时，其将会发生改变。
+
+- 内部--清理变量(Internals-Cleaning Up Variables)  
+
+&emsp;&emsp;当一个值小于256位时，在某些情况下必须清空剩余的位。Solidity编译器将会在这些多余的垃圾位产生不利影响之前将其清空。例如，再将数据写入内存之前，剩余位需要被清空，因为这些位可能会造成数据紊乱。  
+
+&emsp;&emsp;另一方面，如果后续操作不受影响，我们将不会立即清理位。例如，由于 `Jumpi` 指令认为任何非零值都为真，因此在讲布尔值用作Jumpi条件之前我们不会清空这些值。  
+
+&emsp;&emsp;除了以上设计原则之外，Solidity编译器将在数据加载到堆栈上时清空输入数据。不同数据的类型具有不同的清空规则：  
+
+|类型(Type)|有效值|无效值导致的结果|
+|:---|:---:|:---|
+|n个成员的枚举|0到n-1|异常|
+|布尔|0或1|1|
+|有符号整数|符号扩展字|目前会直接打包；将来会抛出异常|
+|无符号整数|高位补0|目前会直接打包；将来会抛出异常|
+
+- 内部优化(Internals-The Optimiser)  
+
+&emsp;&emsp;Solidity 优化器是在汇编语言级别工作的，所以它可以并且也被其他语言所使用。它通过 `JUMP` 和 `JUMPDEST` 语句将指令集序列分割为基础的代码块。在这些代码块内的指令集会被分析，并且对堆栈、内存或存储的每个修改都会被记录为表达式，这些表达式由一个指令和基本上是指向其他表达式的参数列表所组成。这个优化器使用一个叫做“CommonSubexpressionEliminator"的组件lai，在其他任务中，找到恒等的表达式，并将它们组合到一个表达式类中，优化器将将首先尝试在已知表达式中查询新的表达式。如果没有找到，表达式将会按照 `constant + constant = sum_of_constants` 或者 `x * 1 = x` 的规则进行简化。由于这是一个递归的执行过程，因此，如果我们知道一个复杂的表达式恒等于1时，我们可以应用第二条规则。对于storage和memory具体位置的修改必须删除有关storage与memory位置的认知(Knowledge)，这里的区别我们并不清楚：假如我们先在x位置写入，然后在y位置写入，并且两者都是输入变量，那么第二个变量将会覆盖第一个，因此在y写入后我们并不知道x中储存了什么。如果表达式 `x-y` 的简化结果为非零常量，那么我们知道我们可以保持对x中存储内容的认知。  
+
+&emsp;&emsp;在这个过程之后，我们知道哪些表达式必须在栈的末尾，并有一个对内存和存储的修改列表。这些信息与基本块一起存储，并用于链接它们。此外，有关堆栈、存储和内存配置的知识将转发到下一个块。如果我们知道所有 `JUMP` 和 `JUMPI`的目标，我们就可以建立一个完整的程序控制流程图。如果只有一个我们不知道的目标(原则上这可以发生，跳跃目标可以从输入中计算)，我们必须清除有关块输入状态的所有认知，因为它可能是未知跳跃的目标。如果优化器找到一个条件值为常量的 `Jumpi`，它会将其转换为无条件的 `Jumpi`。  
+
+&emsp;&emsp;最后一步是重新生成每个块中的代码。优化器从块末尾堆栈上的表达式创建依赖关系图，并删除不属于此图的每个操作。它生成的代码按照原始代码的顺序将修改应用于内存和存储(删除发现不需要的修改)。最后，它生成所有需要在堆栈上正确位置的值。  
+
+&emsp;&emsp;这些步骤应用于每个基本块，如果新生成的代码较小，则将其用作替换代码。如果在 `Jumpi` 处拆分基本块，并且在分析过程中，条件评估为常量，则根据常量的值替换 `Jumpi`。例如：  
+
+```solidity
+uint x = 7;
+data[7] = 9;
+if (data[x] != x + 2)
+  return 2;
+else
+  return 1;
+```
+简化后：  
+```solidity
+data[7] = 9;
+return 1;
+```
+
+- 源码映射(Source Mappings)  
+
+&emsp;&emsp;作为AST输出的一部分，编译器提供由AST中的各个节点表示的源代码范围。这可以用于各种用途，从基于AST报告错误的静态分析工具，到突出显示局部变量及其用途的调试工具。  
+
+&emsp;&emsp;此外，编译器还可以生成从字节码到生成指令的源代码范围的映射。这对于在字节码级别上操作的静态分析工具以及在调试器内显示源代码中的当前位置或处理断点来说十分重要。  
+
+&emsp;&emsp;这两种源映射都使用整数标识符来引用源文件。源文件的标识符存储在输出\['sources'\]\[sourcename\]\['id']中，其中output是解析为JSON的标准JSON编译器接口的输出。  
+
+> 对于不与任何特定源文件关联的指令，源映射将分配一个-1的整数标识符。对于源自编译器生成的内联汇编语句的字节码部分，可能会发生这种情况。  
+
+AST内的源映射使用以下表示法：  
+
+```solidity
+s:l:f
+```
+
+&emsp;&emsp;其中s是到源文件中范围开头的字节偏移量，l是源范围的长度（以字节为单位），f是上面提到的源索引。   
+
+&emsp;&emsp;字节码的源映射中的编码更加复杂：它是由 `;` 分隔的 `s:l:f:j` 列表。这些元素中的每一个都对应于一条指令，即不能使用字节偏移量，但必须使用指令偏移量（推送指令比单个字节长）。字段 `s` ,`l` 和f如上所述，`j`可以是 `i` ,`o` 或 `-` 表示跳转指令是进入函数、从函数返回还是作为循环的一部分的常规跳转。
+
+为了压缩这些源映射，尤其是字节码映射，使用以下规则：  
+
+* 如果字段为空，则使用前面元素的值。  
+
+* 如果缺少a:，则以下所有字段都视为空。  
+
+这意味着以下源映射表示相同的信息：  
+
+```solidity
+1:2:1;1:9:1;2:1:2;2:1:2;2:1:2
+
+1:2:1;:9;2:1:2;;
+```
+
+- 技巧与窍门(Tips and Tricks)  
+
+* 对数组使用 `delete` 来清空其所有元素
+  
+* 对struct中的元素使用较短的数据类型，并且对他们排序，以便将较短的类型打包在一个slot中来消耗更少的gas  
+
+* 确保state变量为public类型，编译器将为你自动生成一个getter  
+
+* 如果你最终需要在函数开始位置检查很多输入条件或者状态变量的值，你可以尝试使用装饰器(Modifier)  
+
+* 如果你的合约有一个 `send` 函数，但你想要使用内置的 send 函数，你可以使用 `address(contractVariable).send(amount)`  
+
+* 使用一个赋值语句就可以初始化 struct：x = MyStruct({a: 1, b: 2});  
+
+> 如果存储结构具有紧密打包(Tightly packed)的属性，请使用单独的赋值对其进行初始化：`x.a=1;x.b=2;`。这样，优化器一次更新存储将更容易，从而使分配开销更小。  
+
+- 速查表(Cheatsheet)  
+
+&emsp;&emsp;运算符顺序优先级排序，以下是按计算顺序列出的运算符的优先顺序。  
+
+|优先|描述|算符|
+|:---|:---:|:---|
+|1|后置自增和自减|`++，--`|
+|1|创建类型实例|`new <typename>`|
+|1|数组元素|`<array>[<index>]`|
+|1|访问成员|`<object>.<member>`|
+|1|函数调用|`<func>(<args...>)`|
+|1|小括号|`(<statement>)`|
+|2|前置自增和自减|`++, --`|
+|2|一元运算的加和减|`+,-`|
+|2|一元操作符|`delete`|
+|2|逻辑非|`!`|
+|2|按位非|`~`|
+|3|乘方|`**`|
+|4|乘、除和模运算|`*, /, %`|
+|5|算术加和减|`+, -`|
+|6|移位操作符|`<<, >>`|
+|7|按位与|`&`|
+|8|按位异或|`^`|
+|9|按位或|`|`|
+|10|非等操作符|`<, >, <=, >=`|
+|11|等于操作符|`==, !=`|
+|12|逻辑与|`&&`|
+|13|逻辑或|`||`|
+|14|三元操作符|`<conditional> ? <if-true> : <if-false>`|
+|15|赋值操作符|`=,|=, ^=,&=, <<=, >>=, +=, -=, *=, /=, %=`|
+|16|逗号|`,`|
+
+- 全局变量(Global Variables)  
+
+* `abi.encode(...) returns (bytes)`： ABI - 对给定参数进行编码
+* `abi.encodePacked(...) returns (bytes)`：对给定参数执行 紧打包编码
+* `abi.encodeWithSelector(bytes4 selector, ...) returns (bytes)`： ABI - 对给定参数进行编码，并以给定的函数选择器作为起始的 4 字节数据一起返回
+* `abi.encodeWithSignature(string signature, ...) returns (bytes)`：等价于 `abi.encodeWithSelector(bytes4(keccak256(signature), ...)`
+* `block.blockhash(uint blockNumber) returns (bytes32)`：指定区块的区块哈希——仅可用于最新的 256 个区块且不包括当前区块；而 blocks 从 0.4.22 版本开始已经不推荐使用，由 `blockhash(uint blockNumber) `代替
+* `block.coinbase （address）`：挖出当前区块的矿工的地址
+* `lock.difficulty （uint）`：当前区块的难度值
+* `block.gaslimit （uint）`：当前区块的 gas 上限
+* `block.number （uint）`：当前区块的区块号
+* `block.timestamp （uint）`：当前区块的时间戳
+* `gasleft() returns (uint256)`：剩余的 gas
+* `msg.data （bytes）`：完整的 calldata
+* `msg.gas （uint）`：剩余的 gas - 自 0.4.21 版本开始已经不推荐使用，由 gesleft() 代替
+* `msg.sender （address）`：消息发送方（当前调用）
+* `msg.value （uint）`：随消息发送的 wei 的数量
+* `now （uint）`：当前区块的时间戳（等价于 block.timestamp）
+* `tx.gasprice (uint)`：交易的 gas price
+* `tx.origin （address）`：交易发送方（完整调用链上的原始发送方）
+* `assert(bool condition)`：如果条件值为 false 则中止执行并回退所有状态变更（用做内部错误）
+* `require(bool condition)`：如果条件值为 false 则中止执行并回退所有状态变更（用做异常输入或外部组件错误）
+* `require(bool condition, string message)`：如果条件值为 false 则中止执行并回退所有状态变更（用做异常输入或外部组件错误），可以同时提供错误消息
+* `revert()`：中止执行并回复所有状态变更
+* `revert(string message)`：中止执行并回复所有状态变更，可以同时提供错误消息
+* `blockhash(uint blockNumber) returns (bytes32)`：指定区块的区块哈希——仅可用于最新的 256 个区块
+* `keccak256(...) returns (bytes32)`：计算 紧打包编码 的 Ethereum-SHA-3（Keccak-256）哈希
+* `sha3(...) returns (bytes32)`：等价于 keccak256
+* `sha256(...) returns (bytes32)`：计算 紧打包编码 的 SHA-256 哈希
+* `ripemd160(...) returns (bytes20)`：计算 紧打包编码 的 RIPEMD-160 哈希
+* `ecrecover(bytes32 hash, uint8 v, bytes32 r, bytes32 s) returns (address)`：基于椭圆曲线签名找回与指定公钥关联的地址，发生错误的时候返回 0
+* `addmod(uint x, uint y, uint k) returns (uint)`：计算 (x + y) % k 的值，其中加法的结果即使超过 2**256 也不会被截取。从 0.5.0 版本开始会加入对 k != 0 的 assert（即会在此函数开头执行 `assert(k != 0); `作为参数检查，译者注）。
+* `mulmod(uint x, uint y, uint k) returns (uint)`：计算 (x * y) % k 的值，其中乘法的结果即使超过 2**256 也不会被截取。从 0.5.0 版本开始会加入对 k != 0 的 assert（即会在此函数开头执行 `assert(k != 0); `作为参数检查，译者注）。
+* `this`（类型为当前合约的变量）：当前合约实例，可以准确地转换为 address
+* `super`：当前合约的上一级继承关系的合约
+* `selfdestruct(address recipient)`：销毁当前合约，把余额发送到给定地址
+* `suicide(address recipient)`：与 selfdestruct 等价，但已不推荐使用
+* `<address>.balance （uint256）`： 地址类型 的余额，以 Wei 为单位
+* `<address>.send(uint256 amount) returns (bool)`：向 地址类型 发送给定数量的 Wei，失败时返回 false
+* `<address>.transfer(uint256 amount)`：向 地址类型 发送给定数量的 Wei，失败时会把错误抛出（throw）  
 
 
+> 不要用 block.timestamp、now 或者 blockhash 作为随机种子，除非你明确知道你在做什么。  
+> 
+> 时间戳和区块哈希都可以在一定程度上被矿工所影响。如果你用哈希值作为随机种子，那么例如挖矿团体中的坏人就可以使用给定的哈希来执行一个赌场功能，如果他们没赢钱，他们可以简单地换一个哈希再试。  
+> 
+> 当前区块的时间戳必须比前一个区块的时间戳大，但唯一可以确定的就是它会是权威链（主链或者主分支）上两个连续区块时间戳之间的一个数值。
+
+> 出于扩展性的原因，你无法取得所有区块的哈希。只有最新的 256 个区块的哈希可以拿到，其他的都将为 0。
 
 
+- 保留字(Reserved Keywords)  
+
+以下是 Solidity 的保留字，未来可能会变为语法的一部分：
+
+```solidity
+abstract, after, alias, apply, auto, case, catch, copyof, default, define, final, immutable, implements, in, inline, let, macro, match, mutable, null, of, override, partial, promise, reference, relocatable, sealed, sizeof, static, supports, switch, try, type, typedef, typeof, unchecked.
+```
+
+- 语法表(Language Grammar)  
+
+```solidity
+SourceUnit = (PragmaDirective | ImportDirective | ContractDefinition)*
+
+// Pragma actually parses anything up to the trailing ';' to be fully forward-compatible.
+PragmaDirective = 'pragma' Identifier ([^;]+) ';'
+
+ImportDirective = 'import' StringLiteral ('as' Identifier)? ';'
+        | 'import' ('*' | Identifier) ('as' Identifier)? 'from' StringLiteral ';'
+        | 'import' '{' Identifier ('as' Identifier)? ( ',' Identifier ('as' Identifier)? )* '}' 'from' StringLiteral ';'
+
+ContractDefinition = ( 'contract' | 'library' | 'interface' ) Identifier
+                     ( 'is' InheritanceSpecifier (',' InheritanceSpecifier )* )?
+                     '{' ContractPart* '}'
+
+ContractPart = StateVariableDeclaration | UsingForDeclaration
+             | StructDefinition | ModifierDefinition | FunctionDefinition | EventDefinition | EnumDefinition
+
+InheritanceSpecifier = UserDefinedTypeName ( '(' Expression ( ',' Expression )* ')' )?
+
+StateVariableDeclaration = TypeName ( 'public' | 'internal' | 'private' | 'constant' )* Identifier ('=' Expression)? ';'
+UsingForDeclaration = 'using' Identifier 'for' ('*' | TypeName) ';'
+StructDefinition = 'struct' Identifier '{'
+                     ( VariableDeclaration ';' (VariableDeclaration ';')* ) '}'
+
+ModifierDefinition = 'modifier' Identifier ParameterList? Block
+ModifierInvocation = Identifier ( '(' ExpressionList? ')' )?
+
+FunctionDefinition = 'function' Identifier? ParameterList
+                     ( ModifierInvocation | StateMutability | 'external' | 'public' | 'internal' | 'private' )*
+                     ( 'returns' ParameterList )? ( ';' | Block )
+EventDefinition = 'event' Identifier EventParameterList 'anonymous'? ';'
+
+EnumValue = Identifier
+EnumDefinition = 'enum' Identifier '{' EnumValue? (',' EnumValue)* '}'
+
+ParameterList = '(' ( Parameter (',' Parameter)* )? ')'
+Parameter = TypeName StorageLocation? Identifier?
+
+EventParameterList = '(' ( EventParameter (',' EventParameter )* )? ')'
+EventParameter = TypeName 'indexed'? Identifier?
+
+FunctionTypeParameterList = '(' ( FunctionTypeParameter (',' FunctionTypeParameter )* )? ')'
+FunctionTypeParameter = TypeName StorageLocation?
+
+// semantic restriction: mappings and structs (recursively) containing mappings
+// are not allowed in argument lists
+VariableDeclaration = TypeName StorageLocation? Identifier
+
+TypeName = ElementaryTypeName
+         | UserDefinedTypeName
+         | Mapping
+         | ArrayTypeName
+         | FunctionTypeName
+         | ( 'address' 'payable' )
+
+UserDefinedTypeName = Identifier ( '.' Identifier )*
+
+Mapping = 'mapping' '(' ElementaryTypeName '=>' TypeName ')'
+ArrayTypeName = TypeName '[' Expression? ']'
+FunctionTypeName = 'function' FunctionTypeParameterList ( 'internal' | 'external' | StateMutability )*
+                   ( 'returns' FunctionTypeParameterList )?
+StorageLocation = 'memory' | 'storage' | 'calldata'
+StateMutability = 'pure' | 'view' | 'payable'
+
+Block = '{' Statement* '}'
+Statement = IfStatement | WhileStatement | ForStatement | Block | InlineAssemblyStatement |
+            ( DoWhileStatement | PlaceholderStatement | Continue | Break | Return |
+              Throw | EmitStatement | SimpleStatement ) ';'
+
+ExpressionStatement = Expression
+IfStatement = 'if' '(' Expression ')' Statement ( 'else' Statement )?
+WhileStatement = 'while' '(' Expression ')' Statement
+PlaceholderStatement = '_'
+SimpleStatement = VariableDefinition | ExpressionStatement
+ForStatement = 'for' '(' (SimpleStatement)? ';' (Expression)? ';' (ExpressionStatement)? ')' Statement
+InlineAssemblyStatement = 'assembly' StringLiteral? AssemblyBlock
+DoWhileStatement = 'do' Statement 'while' '(' Expression ')'
+Continue = 'continue'
+Break = 'break'
+Return = 'return' Expression?
+Throw = 'throw'
+EmitStatement = 'emit' FunctionCall
+VariableDefinition = (VariableDeclaration | '(' VariableDeclaration? (',' VariableDeclaration? )* ')' ) ( '=' Expression )?
+
+// Precedence by order (see github.com/ethereum/solidity/pull/732)
+Expression
+  = Expression ('++' | '--')
+  | NewExpression
+  | IndexAccess
+  | MemberAccess
+  | FunctionCall
+  | '(' Expression ')'
+  | ('!' | '~' | 'delete' | '++' | '--' | '+' | '-') Expression
+  | Expression '**' Expression
+  | Expression ('*' | '/' | '%') Expression
+  | Expression ('+' | '-') Expression
+  | Expression ('<<' | '>>') Expression
+  | Expression '&' Expression
+  | Expression '^' Expression
+  | Expression '|' Expression
+  | Expression ('<' | '>' | '<=' | '>=') Expression
+  | Expression ('==' | '!=') Expression
+  | Expression '&&' Expression
+  | Expression '||' Expression
+  | Expression '?' Expression ':' Expression
+  | Expression ('=' | '|=' | '^=' | '&=' | '<<=' | '>>=' | '+=' | '-=' | '*=' | '/=' | '%=') Expression
+  | PrimaryExpression
+
+PrimaryExpression = BooleanLiteral
+                  | NumberLiteral
+                  | HexLiteral
+                  | StringLiteral
+                  | TupleExpression
+                  | Identifier
+                  | ElementaryTypeNameExpression
+
+ExpressionList = Expression ( ',' Expression )*
+NameValueList = Identifier ':' Expression ( ',' Identifier ':' Expression )*
+
+FunctionCall = Expression '(' FunctionCallArguments ')'
+FunctionCallArguments = '{' NameValueList? '}'
+                      | ExpressionList?
+
+NewExpression = 'new' TypeName
+MemberAccess = Expression '.' Identifier
+IndexAccess = Expression '[' Expression? ']'
+
+BooleanLiteral = 'true' | 'false'
+NumberLiteral = ( HexNumber | DecimalNumber ) (' ' NumberUnit)?
+NumberUnit = 'wei' | 'szabo' | 'finney' | 'ether'
+           | 'seconds' | 'minutes' | 'hours' | 'days' | 'weeks' | 'years'
+HexLiteral = 'hex' ('"' ([0-9a-fA-F]{2})* '"' | '\'' ([0-9a-fA-F]{2})* '\'')
+StringLiteral = '"' ([^"\r\n\\] | '\\' .)* '"'
+Identifier = [a-zA-Z_$] [a-zA-Z_$0-9]*
+
+HexNumber = '0x' [0-9a-fA-F]+
+DecimalNumber = [0-9]+ ( '.' [0-9]* )? ( [eE] [0-9]+ )?
+
+TupleExpression = '(' ( Expression? ( ',' Expression? )*  )? ')'
+                | '[' ( Expression  ( ',' Expression  )*  )? ']'
+
+ElementaryTypeNameExpression = ElementaryTypeName
+
+ElementaryTypeName = 'address' | 'bool' | 'string' | Int | Uint | Byte | Fixed | Ufixed
+
+Int = 'int' | 'int8' | 'int16' | 'int24' | 'int32' | 'int40' | 'int48' | 'int56' | 'int64' | 'int72' | 'int80' | 'int88' | 'int96' | 'int104' | 'int112' | 'int120' | 'int128' | 'int136' | 'int144' | 'int152' | 'int160' | 'int168' | 'int176' | 'int184' | 'int192' | 'int200' | 'int208' | 'int216' | 'int224' | 'int232' | 'int240' | 'int248' | 'int256'
+
+Uint = 'uint' | 'uint8' | 'uint16' | 'uint24' | 'uint32' | 'uint40' | 'uint48' | 'uint56' | 'uint64' | 'uint72' | 'uint80' | 'uint88' | 'uint96' | 'uint104' | 'uint112' | 'uint120' | 'uint128' | 'uint136' | 'uint144' | 'uint152' | 'uint160' | 'uint168' | 'uint176' | 'uint184' | 'uint192' | 'uint200' | 'uint208' | 'uint216' | 'uint224' | 'uint232' | 'uint240' | 'uint248' | 'uint256'
+
+Byte = 'byte' | 'bytes' | 'bytes1' | 'bytes2' | 'bytes3' | 'bytes4' | 'bytes5' | 'bytes6' | 'bytes7' | 'bytes8' | 'bytes9' | 'bytes10' | 'bytes11' | 'bytes12' | 'bytes13' | 'bytes14' | 'bytes15' | 'bytes16' | 'bytes17' | 'bytes18' | 'bytes19' | 'bytes20' | 'bytes21' | 'bytes22' | 'bytes23' | 'bytes24' | 'bytes25' | 'bytes26' | 'bytes27' | 'bytes28' | 'bytes29' | 'bytes30' | 'bytes31' | 'bytes32'
+
+Fixed = 'fixed' | ( 'fixed' [0-9]+ 'x' [0-9]+ )
+
+Ufixed = 'ufixed' | ( 'ufixed' [0-9]+ 'x' [0-9]+ )
 
 
+AssemblyBlock = '{' AssemblyStatement* '}'
 
+AssemblyStatement = AssemblyBlock
+                  | AssemblyFunctionDefinition
+                  | AssemblyVariableDeclaration
+                  | AssemblyAssignment
+                  | AssemblyIf
+                  | AssemblyExpression
+                  | AssemblySwitch
+                  | AssemblyForLoop
+                  | AssemblyBreakContinue
+AssemblyFunctionDefinition =
+    'function' Identifier '(' AssemblyIdentifierList? ')'
+    ( '->' AssemblyIdentifierList )? AssemblyBlock
+AssemblyVariableDeclaration = 'let' AssemblyIdentifierList ( ':=' AssemblyExpression )?
+AssemblyAssignment = AssemblyIdentifierList ':=' AssemblyExpression
+AssemblyExpression = AssemblyFunctionCall | Identifier | Literal
+AssemblyIf = 'if' AssemblyExpression AssemblyBlock
+AssemblySwitch = 'switch' AssemblyExpression ( Case+ AssemblyDefault? | AssemblyDefault )
+AssemblyCase = 'case' Literal AssemblyBlock
+AssemblyDefault = 'default' AssemblyBlock
+AssemblyForLoop = 'for' AssemblyBlock AssemblyExpression AssemblyBlock AssemblyBlock
+AssemblyBreakContinue = 'break' | 'continue'
+AssemblyFunctionCall = Identifier '(' ( AssemblyExpression ( ',' AssemblyExpression )* )? ')'
 
-
-
-
-
-
-
-
-
-
+AssemblyIdentifierList = Identifier ( ',' Identifier )*
+```
 
 ---  
 
